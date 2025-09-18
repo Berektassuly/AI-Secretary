@@ -5,17 +5,11 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { transcribeFileWithOpenAI } from "@/lib/openai";
-
 const whisperCppBinary = process.env.WHISPER_CPP_BINARY;
 const whisperCppModel = process.env.WHISPER_CPP_MODEL;
 const whisperCppLanguage = process.env.WHISPER_CPP_LANGUAGE;
 const whisperCppThreads = parsePositiveInteger(process.env.WHISPER_CPP_THREADS);
 const whisperCppEnabled = parseBoolean(process.env.WHISPER_CPP_ENABLED, true);
-const whisperCppFallbackOnError = parseBoolean(
-  process.env.WHISPER_CPP_FALLBACK_ON_ERROR,
-  true,
-);
 const whisperCppTimeoutMs = parseTimeout(process.env.WHISPER_CPP_TIMEOUT_MS);
 
 const MAX_STDERR_LOG_LENGTH = 2000;
@@ -159,28 +153,16 @@ async function transcribeFileWithWhisperCpp(file: File): Promise<string> {
 }
 
 export async function transcribeAudioFile(file: File): Promise<string> {
-  if (isWhisperCppAvailable()) {
-    try {
-      return await transcribeFileWithWhisperCpp(file);
-    } catch (error) {
-      console.error("Whisper.cpp transcription failed", error);
-      if (!whisperCppFallbackOnError) {
-        throw error instanceof Error ? error : new Error("Whisper.cpp transcription failed");
-      }
-      console.warn("Falling back to OpenAI Whisper API");
-      try {
-        return await transcribeFileWithOpenAI(file);
-      } catch (fallbackError) {
-        console.error("Fallback to OpenAI Whisper API failed", fallbackError);
-        const primaryMessage = error instanceof Error ? error.message : "Unknown whisper.cpp error";
-        const fallbackMessage =
-          fallbackError instanceof Error ? fallbackError.message : "Unknown OpenAI error";
-        throw new Error(
-          `Whisper.cpp transcription failed (${primaryMessage}) and fallback to OpenAI Whisper API failed (${fallbackMessage})`,
-        );
-      }
-    }
+  if (!isWhisperCppAvailable()) {
+    throw new Error(
+      "Локальный движок Whisper не настроен: укажите переменные WHISPER_CPP_BINARY и WHISPER_CPP_MODEL",
+    );
   }
 
-  return transcribeFileWithOpenAI(file);
+  try {
+    return await transcribeFileWithWhisperCpp(file);
+  } catch (error) {
+    console.error("Whisper.cpp transcription failed", error);
+    throw error instanceof Error ? error : new Error("Whisper.cpp transcription failed");
+  }
 }

@@ -16,8 +16,6 @@ services:
       context: ./ai-secretary-app
     container_name: ai-secretary-app
     environment:
-      - OPENAI_API_KEY=
-      - OPENAI_REQUEST_TIMEOUT_MS=90000
       - NLP_SERVICE_URL=http://nlp-service:8000
       - NLP_SERVICE_REQUEST_TIMEOUT_MS=45000
       - NLP_SERVICE_RETRY_COUNT=2

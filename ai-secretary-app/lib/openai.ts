@@ -19,7 +19,7 @@ function getClient(): OpenAI {
   return client;
 }
 
-export async function transcribeFileWithWhisper(file: File): Promise<string> {
+export async function transcribeFileWithOpenAI(file: File): Promise<string> {
   const openai = getClient();
   const buffer = Buffer.from(await file.arrayBuffer());
   const preparedFile = await toFile(buffer, file.name || "meeting-audio", {

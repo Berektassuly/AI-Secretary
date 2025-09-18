@@ -10,6 +10,57 @@ interface CreateJiraRequest {
 
 const JIRA_TIMEOUT = Number(process.env.JIRA_REQUEST_TIMEOUT_MS ?? 45000);
 
+function sanitizeJiraConfig(config: JiraConfig): JiraConfig {
+  const baseUrlRaw = typeof config.baseUrl === "string" ? config.baseUrl.trim() : "";
+  const hasProtocol = /^https?:\/\//i.test(baseUrlRaw);
+  const normalizedBaseUrl = baseUrlRaw.length === 0 ? "" : hasProtocol ? baseUrlRaw : `https://${baseUrlRaw}`;
+
+  const email = typeof config.email === "string" ? config.email.trim() : "";
+  const token = typeof config.token === "string" ? config.token.trim() : "";
+  const projectKeyRaw = typeof config.projectKey === "string" ? config.projectKey.trim() : "";
+  const projectKey = projectKeyRaw.toUpperCase().replace(/\s+/g, "");
+  const descriptionRaw = typeof config.description === "string" ? config.description.trim() : "";
+
+  return {
+    baseUrl: normalizedBaseUrl,
+    email,
+    token,
+    projectKey,
+    description: descriptionRaw.length > 0 ? descriptionRaw : undefined,
+  };
+}
+
+function validateJiraConfig(config: JiraConfig): string | null {
+  if (!config.baseUrl) {
+    return "Базовый URL Jira обязателен";
+  }
+
+  try {
+    // eslint-disable-next-line no-new
+    new URL(config.baseUrl);
+  } catch (error) {
+    return "Некорректный базовый URL Jira";
+  }
+
+  if (!config.email) {
+    return "E-mail пользователя Jira обязателен";
+  }
+
+  if (!config.token) {
+    return "API token Jira обязателен";
+  }
+
+  if (!config.projectKey) {
+    return "Ключ проекта Jira обязателен";
+  }
+
+  if (!/^[A-Z][A-Z0-9]*$/.test(config.projectKey)) {
+    return "Ключ проекта Jira должен содержать только латинские заглавные буквы и цифры";
+  }
+
+  return null;
+}
+
 export async function POST(request: Request): Promise<NextResponse> {
   let payload: CreateJiraRequest;
   try {
@@ -26,6 +77,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ detail: "Конфигурация Jira обязательна" }, { status: 400 });
   }
 
+  const sanitizedConfig = sanitizeJiraConfig(payload.config);
+  const validationError = validateJiraConfig(sanitizedConfig);
+  if (validationError) {
+    return NextResponse.json({ detail: validationError }, { status: 400 });
+  }
+
   const results: JiraResult[] = [];
 
   for (const summary of payload.tasks) {
@@ -36,7 +93,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), JIRA_TIMEOUT);
     try {
-      const result = await createJiraTask(payload.config, summary, controller.signal);
+      const result = await createJiraTask(sanitizedConfig, summary, controller.signal);
       results.push(result);
     } catch (error) {
       const message =

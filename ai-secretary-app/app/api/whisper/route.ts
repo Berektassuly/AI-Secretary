@@ -26,9 +26,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ transcript });
   } catch (error) {
     console.error("Whisper transcription failed", error);
-    return NextResponse.json(
-      { detail: "Ошибка при обработке аудио (Whisper)" },
-      { status: 502 },
-    );
+    const detail = error instanceof Error ? error.message : "Ошибка при обработке аудио (Whisper)";
+    const status = error instanceof Error && detail.includes("не настроен") ? 500 : 502;
+    return NextResponse.json({ detail }, { status });
   }
 }

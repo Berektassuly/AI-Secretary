@@ -21,7 +21,9 @@ export function JiraIntegrationForm({ onSubmit, disabled, defaultBaseUrl }: Jira
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = event.target;
-    setConfig((prev) => ({ ...prev, [name]: value }));
+    const nextValue =
+      name === "projectKey" ? value.toUpperCase().replace(/\s+/g, "") : value;
+    setConfig((prev) => ({ ...prev, [name]: nextValue }));
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -94,10 +96,14 @@ export function JiraIntegrationForm({ onSubmit, disabled, defaultBaseUrl }: Jira
             value={config.projectKey}
             onChange={handleChange}
             placeholder="AI"
+            autoCapitalize="characters"
             className="mt-1 w-full rounded-md border border-slate-300 p-2 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
             disabled={disabled}
             required
           />
+          <p className="mt-1 text-xs text-slate-500">
+            Используйте ключ проекта из Jira (обычно состоит из заглавных латинских букв и цифр).
+          </p>
         </div>
         <div className="md:col-span-2">
           <label htmlFor="description" className="block text-sm font-medium text-slate-700">

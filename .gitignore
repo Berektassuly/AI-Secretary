@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+.env
+.venv/
+venv/
+instance/
+.pytest_cache/
+
+# Node
+node_modules/
+.npm/
+.next/
+out/
+.pnp.cjs
+.pnp.loader.mjs
+.yarn/
+
+# Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker
+*.log
+
+# Misc
+coverage/
+dist/
+build/

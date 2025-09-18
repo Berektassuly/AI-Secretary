@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  nlp-service:
+    build:
+      context: ./nlp_service
+    container_name: nlp-service
+    environment:
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  ai-secretary-app:
+    build:
+      context: ./ai-secretary-app
+    container_name: ai-secretary-app
+    environment:
+      - OPENAI_API_KEY=
+      - OPENAI_REQUEST_TIMEOUT_MS=90000
+      - NLP_SERVICE_URL=http://nlp-service:8000
+      - NLP_SERVICE_REQUEST_TIMEOUT_MS=45000
+      - NLP_SERVICE_RETRY_COUNT=2
+      - JIRA_REQUEST_TIMEOUT_MS=45000
+      - NEXT_PUBLIC_JIRA_DEFAULT_BASE_URL=
+    ports:
+      - "3000:3000"
+    depends_on:
+      - nlp-service
+    restart: unless-stopped

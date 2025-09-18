@@ -10,7 +10,7 @@
 [Браузер]
    ↓
 [Next.js App Router]
-   ├── POST /api/whisper  ──▶  OpenAI Whisper API
+   ├── POST /api/whisper  ──▶  локальный whisper.cpp (если настроен) или OpenAI Whisper API
    ├── POST /api/extract-tasks ──▶  Python NLP Microservice
    └── POST /api/create-jira-tasks ──▶  Jira Cloud API
 
@@ -73,7 +73,7 @@ docker compose up
 ### Next.js (ai-secretary-app)
 
 - **API Routes**
-  - `POST /api/whisper` — принимает файл (FormData `file`), проверяет лимит 25 МБ, вызывает `openai.audio.transcriptions.create` с моделью `whisper-1`.
+- `POST /api/whisper` — принимает файл (FormData `file`), проверяет лимит 25 МБ, запускает локальный `whisper.cpp` (если настроен) и при необходимости откатывается на `openai.audio.transcriptions.create` c моделью `whisper-1`.
   - `POST /api/extract-tasks` — защищённый прокси к `nlp_service`. Обрабатывает таймауты и повторные попытки.
   - `POST /api/create-jira-tasks` — создаёт задачи в Jira. Накапливает результаты по каждой задаче.
 - **UI/UX**
@@ -95,8 +95,15 @@ docker compose up
 
 | Переменная | Назначение |
 | ---------- | ---------- |
-| `OPENAI_API_KEY` | Ключ для Whisper API (обязательная). |
-| `OPENAI_REQUEST_TIMEOUT_MS` | Таймаут вызова Whisper (по умолчанию 90 сек). |
+| `WHISPER_CPP_BINARY` | Путь до исполняемого файла `whisper.cpp` (опционально). |
+| `WHISPER_CPP_MODEL` | Путь до GGML-модели для `whisper.cpp` (обязателен при использовании C++). |
+| `WHISPER_CPP_LANGUAGE` | Код языка (например, `ru`/`en`) для `whisper.cpp`. |
+| `WHISPER_CPP_THREADS` | Количество потоков для `whisper.cpp`. |
+| `WHISPER_CPP_TIMEOUT_MS` | Таймаут выполнения `whisper.cpp` (по умолчанию 300000 мс). |
+| `WHISPER_CPP_ENABLED` | Включить/выключить использование `whisper.cpp` (по умолчанию включено). |
+| `WHISPER_CPP_FALLBACK_ON_ERROR` | Разрешить откат к OpenAI при ошибке `whisper.cpp` (по умолчанию включено). |
+| `OPENAI_API_KEY` | Ключ для Whisper API (нужен для fallback или основного режима). |
+| `OPENAI_REQUEST_TIMEOUT_MS` | Таймаут вызова Whisper API (по умолчанию 90 сек). |
 | `NLP_SERVICE_URL` | URL Python сервиса (по умолчанию `http://nlp-service:8000`). |
 | `NLP_SERVICE_REQUEST_TIMEOUT_MS` | Таймаут при обращении к NLP (45 сек). |
 | `NLP_SERVICE_RETRY_COUNT` | Количество повторных попыток при ошибках NLP (2). |
@@ -116,7 +123,7 @@ docker compose up
 ### `POST /api/whisper`
 - Request: `multipart/form-data` с полем `file`.
 - Response: `200 OK` → `{ "transcript": "..." }`.
-- Ошибки: `400` (нет файла), `413` (лимит), `502` (ошибка OpenAI).
+- Ошибки: `400` (нет файла), `413` (лимит), `502` (ошибка локального движка или OpenAI, если оба режима недоступны).
 
 ### `POST /api/extract-tasks`
 - Request: `{ "transcript": "..." }`.

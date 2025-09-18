@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { transcribeFileWithWhisper } from "@/lib/openai";
+import { transcribeAudioFile } from "@/lib/transcription";
 import { WHISPER_MAX_FILE_SIZE_BYTES } from "@/lib/constants";
 
 export const runtime = "nodejs";
@@ -22,12 +22,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   try {
-    const transcript = await transcribeFileWithWhisper(file);
+    const transcript = await transcribeAudioFile(file);
     return NextResponse.json({ transcript });
   } catch (error) {
     console.error("Whisper transcription failed", error);
     return NextResponse.json(
-      { detail: "Ошибка при обращении к OpenAI Whisper API" },
+      { detail: "Ошибка при обработке аудио (Whisper)" },
       { status: 502 },
     );
   }

@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import threading
+import time
 from collections import OrderedDict
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -113,7 +114,9 @@ class TaskExtractor:
 
         with self._lock:
             if self._initialised:
+                logger.debug("startup() called but extractor is already initialised")
                 return
+            logger.info("Loading NLI models (entail_threshold=%.2f)", self._entail_threshold)
             self._models = self._load_models()
             self._initialised = True
             logger.info("TaskExtractor initialised with models: %s", list(self._models))
@@ -123,6 +126,8 @@ class TaskExtractor:
         """Placeholder for releasing resources."""
 
         with self._lock:
+            if not self._initialised:
+                logger.debug("shutdown() called but extractor was not initialised")
             self._models.clear()
             self._initialised = False
             logger.info("TaskExtractor has been shut down")
@@ -132,13 +137,21 @@ class TaskExtractor:
     # Public API
     # ------------------------------------------------------------------
     def extract_tasks(self, text: str) -> List[ActionItem]:
-        if not text.strip():
+        stripped = text.strip()
+        if not stripped:
+            logger.info("Empty text received, returning no tasks")
             return []
 
-        lang = detect_lang_code(text)
-        candidates = candidate_actions(text)
+        lang = detect_lang_code(stripped)
+        candidates = candidate_actions(stripped)
+        logger.info("Detected language %s, candidate fragments: %d", lang, len(candidates))
         if not candidates:
+            logger.info("No candidates found for action extraction")
             return []
+
+        target_bundle = self._models.get("ru" if lang == "ru" else "en")
+        if target_bundle is None:
+            logger.warning("NLI model for %s is unavailable; falling back to heuristic scoring", lang)
 
         scored: List[Tuple[str, float, str]] = []
         for candidate in candidates:
@@ -213,16 +226,42 @@ class TaskExtractor:
         for lang, (local_dir, remote_name) in registry.items():
             path = local_dir if os.path.isdir(local_dir) else remote_name
             local_only = os.path.isdir(local_dir)
+            start = time.perf_counter()
+            logger.info(
+                "Loading %s NLI model", lang,
+                extra={
+                    "path": path,
+                    "local_dir": local_dir,
+                    "local_only": local_only,
+                },
+            )
             try:
                 tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=local_only)
                 model = AutoModelForSequenceClassification.from_pretrained(
                     path, local_files_only=local_only
                 )
                 models[lang] = ModelBundle(tokenizer=tokenizer, model=model)
-                logger.info("Loaded NLI model for %s from %s", lang, path)
+                elapsed = time.perf_counter() - start
+                logger.info(
+                    "Loaded NLI model for %s", lang,
+                    extra={
+                        "path": path,
+                        "local_only": local_only,
+                        "elapsed_sec": round(elapsed, 2),
+                    },
+                )
             except Exception as exc:  # pragma: no cover - depends on environment
                 models[lang] = None
-                logger.warning("Failed to load NLI model for %s: %s", lang, exc)
+                elapsed = time.perf_counter() - start
+                logger.warning(
+                    "Failed to load NLI model for %s", lang,
+                    extra={
+                        "path": path,
+                        "local_only": local_only,
+                        "elapsed_sec": round(elapsed, 2),
+                        "error": str(exc),
+                    },
+                )
 
         return models
 

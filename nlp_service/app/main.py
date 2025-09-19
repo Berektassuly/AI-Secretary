@@ -28,9 +28,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Load heavy artefacts once during start-up and release on shutdown."""
 
     try:
+        logger.info("Initialising TaskExtractor resources")
         extractor.startup()
+        logger.info("TaskExtractor is ready")
         yield
+    except Exception:
+        logger.exception("TaskExtractor initialisation failed")
+        raise
     finally:
+        logger.info("Releasing TaskExtractor resources")
         extractor.shutdown()
 
 

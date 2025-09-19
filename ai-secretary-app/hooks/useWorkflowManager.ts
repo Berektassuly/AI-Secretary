@@ -1,5 +1,15 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { JiraConfig, JiraResult } from "@/lib/jira";
+import type { ActionItem, GoogleMeetImportPayload, ZoomImportPayload } from "@/lib/types";
+import {
+  clearMeetingHistory as clearStoredMeetingHistory,
+  createMeetingSummary,
+  loadMeetingHistory,
+  persistMeetingSummary,
+  replaceMeetingSummary,
+  type MeetingSource,
+  type MeetingSummary,
+} from "@/lib/memory";
 
 export type WorkflowStatus =
   | "idle"
@@ -19,7 +29,7 @@ export interface WorkflowProgress {
 export interface WorkflowState {
   status: WorkflowStatus;
   transcript: string | null;
-  tasks: string[];
+  tasks: ActionItem[];
   jiraResults: JiraResult[];
   errorMessage: string | null;
   progress: WorkflowProgress;
@@ -51,7 +61,7 @@ async function whisperRequest(file: File): Promise<string> {
   return data.transcript;
 }
 
-async function nlpRequest(transcript: string): Promise<string[]> {
+async function nlpRequest(transcript: string): Promise<ActionItem[]> {
   const response = await fetch("/api/extract-tasks", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -63,15 +73,83 @@ async function nlpRequest(transcript: string): Promise<string[]> {
     };
     throw new Error(detail ?? "Ошибка при анализе текста");
   }
-  const data = (await response.json()) as { tasks: string[] };
+  const data = (await response.json()) as { tasks: ActionItem[] };
   return data.tasks;
+}
+
+async function ingestRequest(
+  endpoint: string,
+  payload: Record<string, unknown>,
+): Promise<{ transcript: string; tasks: ActionItem[] }> {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const { detail } = (await response.json().catch(() => ({ detail: "Ошибка при импорте встречи" }))) as {
+      detail?: string;
+    };
+    throw new Error(detail ?? "Ошибка при импорте встречи");
+  }
+  const data = (await response.json()) as { transcript: string; tasks: ActionItem[] };
+  return {
+    transcript: data.transcript,
+    tasks: data.tasks.map((task) => ({
+      ...task,
+      labels: Array.isArray(task.labels) ? task.labels : [],
+    })),
+  };
 }
 
 export function useWorkflowManager() {
   const [state, setState] = useState<WorkflowState>(initialState);
+  const [history, setHistory] = useState<MeetingSummary[]>([]);
+  const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setHistory(loadMeetingHistory());
+  }, []);
+
+  const persistMeeting = useCallback(
+    (
+      source: MeetingSource,
+      transcript: string,
+      tasks: ActionItem[],
+      metadata?: Record<string, string | undefined | null>,
+    ) => {
+      if (!tasks || tasks.length === 0) {
+        return;
+      }
+      const summary = createMeetingSummary({ source, transcript, tasks, metadata });
+      setHistory((prev) => persistMeetingSummary(summary, prev));
+      setActiveMeetingId(summary.id);
+    },
+    [],
+  );
+
+  const clearHistory = useCallback(() => {
+    clearStoredMeetingHistory();
+    setHistory([]);
+    setActiveMeetingId(null);
+  }, []);
+
+  const updateHistoryWithJira = useCallback(
+    (results: JiraResult[]) => {
+      if (!activeMeetingId) {
+        return;
+      }
+      if (!Array.isArray(results) || results.length === 0) {
+        return;
+      }
+      setHistory((prev) => replaceMeetingSummary(activeMeetingId, (summary) => ({ ...summary, jiraResults: results }), prev));
+    },
+    [activeMeetingId],
+  );
 
   const reset = useCallback(() => {
-    setState(initialState);
+    setState({ ...initialState });
+    setActiveMeetingId(null);
   }, []);
 
   const startUpload = useCallback(async (file: File) => {
@@ -94,6 +172,7 @@ export function useWorkflowManager() {
         progress: { stage: "Анализ текста и извлечение задач...", percentage: 65 },
       }));
       const tasks = await nlpRequest(transcript);
+      persistMeeting("upload", transcript, tasks, { fileName: file.name });
       setState((prev) => ({
         ...prev,
         tasks,
@@ -110,6 +189,77 @@ export function useWorkflowManager() {
       }));
     }
   }, []);
+
+  const startZoomImport = useCallback(
+    async (payload: ZoomImportPayload) => {
+      setState({
+        ...initialState,
+        status: "transcribing",
+        progress: { stage: "Запрос записи Zoom...", percentage: 20 },
+      });
+      try {
+        const { transcript, tasks } = await ingestRequest("/api/ingest/zoom", payload);
+        persistMeeting("zoom", transcript, tasks, {
+          meetingId: payload.meetingId,
+          recordingType: payload.recordingType,
+        });
+        setState({
+          status: "ready",
+          transcript,
+          tasks,
+          jiraResults: [],
+          errorMessage: null,
+          progress: { stage: "Готово к интеграции с Jira", percentage: 90 },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Неизвестная ошибка";
+        setState({
+          status: "error",
+          transcript: null,
+          tasks: [],
+          jiraResults: [],
+          errorMessage: message,
+          progress: { stage: "Произошла ошибка", percentage: 100 },
+        });
+      }
+    },
+    [],
+  );
+
+  const startGoogleImport = useCallback(
+    async (payload: GoogleMeetImportPayload) => {
+      setState({
+        ...initialState,
+        status: "transcribing",
+        progress: { stage: "Загрузка записи Google Meet...", percentage: 20 },
+      });
+      try {
+        const { transcript, tasks } = await ingestRequest("/api/ingest/google-meet", payload);
+        persistMeeting("google", transcript, tasks, {
+          fileId: payload.fileId,
+        });
+        setState({
+          status: "ready",
+          transcript,
+          tasks,
+          jiraResults: [],
+          errorMessage: null,
+          progress: { stage: "Готово к интеграции с Jira", percentage: 90 },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Неизвестная ошибка";
+        setState({
+          status: "error",
+          transcript: null,
+          tasks: [],
+          jiraResults: [],
+          errorMessage: message,
+          progress: { stage: "Произошла ошибка", percentage: 100 },
+        });
+      }
+    },
+    [],
+  );
 
   const submitToJira = useCallback(
     async (config: JiraConfig) => {
@@ -140,6 +290,10 @@ export function useWorkflowManager() {
           detail?: string;
         };
 
+        if (Array.isArray(data.results) && data.results.length > 0) {
+          updateHistoryWithJira(data.results);
+        }
+
         if (!response.ok) {
           setState((prev) => ({
             ...prev,
@@ -167,14 +321,18 @@ export function useWorkflowManager() {
         }));
       }
     },
-    [state.tasks],
+    [state.tasks, updateHistoryWithJira],
   );
 
   return {
     state,
+    history,
     actions: {
       startUpload,
+      startZoomImport,
+      startGoogleImport,
       submitToJira,
+      clearHistory,
       reset,
     },
   };

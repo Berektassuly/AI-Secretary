@@ -6,8 +6,8 @@ import logging
 import os
 import re
 import threading
-from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional
+from collections import OrderedDict
+from typing import Dict, Iterable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -20,17 +20,55 @@ except Exception as exc:  # pragma: no cover - runtime fallback
     AutoTokenizer = None  # type: ignore[assignment]
     logger.warning("Transformers stack is unavailable: %s", exc)
 
+from .llm import LLMTaskEnricher
+from .task_types import ActionItem
+
 
 LANGUAGE_HYPOTHESES = {
     "ru": "Это конкретное поручение, которое нужно выполнить.",
     "en": "This is an actionable task to be done.",
 }
 
+VERB_STEMS = [
+    "провед",
+    "подготов",
+    "отправ",
+    "создат",
+    "напис",
+    "провер",
+    "созвон",
+    "добав",
+    "исправ",
+    "закры",
+    "заплан",
+    "соглас",
+    "обнов",
+    "опис",
+    "развер",
+    "подключ",
+    "оформ",
+    "назнач",
+    "организ",
+    "презент",
+    "ожид",
+    "собер",
+    "дать",
+    "выполн",
+    "подтверд",
+    "утверд",
+    "подел",
+    "скин",
+    "зафикс",
+    "напомн",
+    "подвед",
+    "связ",
+    "контакт",
+]
+
 VERB_RE = re.compile(
-    r"(провести|подготовить|отправить|создать|написать|проверить|созвониться|добавить|исправить|закрыть|запланировать|"
-    r"согласовать|обновить|описать|развернуть|подключить|оформить|назначить|организовать|презентовать|ожидать|"
-    r"собрать|дать|выполнить|подтвердить|утвердить|поделиться|скинуть|зафиксировать|напомнить|подвести итоги|"
-    r"review|plan|schedule|deploy|implement|prepare|send|create|write|check|fix|update|investigate|present|follow up)",
+    r"(" +
+    "|".join(f"{stem}\\w*" for stem in VERB_STEMS) +
+    r"|review|plan|schedule|deploy|implement|prepare|send|create|write|check|fix|update|investigate|present|follow\\s*up)",
     flags=re.IGNORECASE,
 )
 
@@ -45,12 +83,12 @@ MAX_TASK_WORDS = 16
 MAX_TASK_LENGTH = 140
 
 
-@dataclass
 class ModelBundle:
     """Container that keeps tokenizer/model pairs in memory."""
 
-    tokenizer: "AutoTokenizer"  # type: ignore[name-defined]
-    model: "AutoModelForSequenceClassification"  # type: ignore[name-defined]
+    def __init__(self, tokenizer: "AutoTokenizer", model: "AutoModelForSequenceClassification") -> None:  # type: ignore[name-defined]
+        self.tokenizer = tokenizer
+        self.model = model
 
 
 class ExtractionError(RuntimeError):
@@ -65,6 +103,7 @@ class TaskExtractor:
         self._models: Dict[str, Optional[ModelBundle]] = {}
         self._lock = threading.Lock()
         self._initialised = False
+        self._enricher = LLMTaskEnricher()
 
     # ------------------------------------------------------------------
     # Lifecycle management
@@ -78,6 +117,7 @@ class TaskExtractor:
             self._models = self._load_models()
             self._initialised = True
             logger.info("TaskExtractor initialised with models: %s", list(self._models))
+        self._enricher.startup()
 
     def shutdown(self) -> None:
         """Placeholder for releasing resources."""
@@ -86,11 +126,12 @@ class TaskExtractor:
             self._models.clear()
             self._initialised = False
             logger.info("TaskExtractor has been shut down")
+        self._enricher.shutdown()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def extract_tasks(self, text: str) -> List[str]:
+    def extract_tasks(self, text: str) -> List[ActionItem]:
         if not text.strip():
             return []
 
@@ -99,34 +140,42 @@ class TaskExtractor:
         if not candidates:
             return []
 
-        results: List[str] = []
+        scored: List[Tuple[str, float, str]] = []
         for candidate in candidates:
             cleaned = clean_candidate(candidate)
             if not cleaned:
                 continue
-            if self._should_keep(cleaned, lang):
-                results.append(cleaned)
+            score = self._score_candidate(cleaned, lang)
+            if score is None:
+                continue
+            scored.append((cleaned, score, candidate))
 
-        # Deduplicate while preserving order
-        seen: set[str] = set()
-        deduped: List[str] = []
-        for task in results:
-            if task not in seen:
-                seen.add(task)
-                deduped.append(task)
-        return deduped
+        if not scored:
+            return []
+
+        deduped: "OrderedDict[str, Tuple[float, str]]" = OrderedDict()
+        for summary, score, source in scored:
+            if summary not in deduped or score > deduped[summary][0]:
+                deduped[summary] = (score, source)
+
+        results: List[ActionItem] = []
+        for summary, (score, source) in deduped.items():
+            base_item = ActionItem(summary=summary, confidence=score, source=source)
+            enriched = self._enricher.enrich(base_item, text)
+            results.append(enriched)
+        return results
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _should_keep(self, text: str, lang: str) -> bool:
+    def _score_candidate(self, text: str, lang: str) -> Optional[float]:
         bundle = self._models.get("ru" if lang == "ru" else "en")
         if bundle is None:
             # No model available for language – fallback to heuristic acceptance
-            return True
+            return 0.65
 
         if torch is None:
-            return True
+            return 0.65
 
         inputs = bundle.tokenizer(
             [text],
@@ -140,7 +189,9 @@ class TaskExtractor:
             logits = bundle.model(**inputs).logits[0]
             probs = torch.softmax(logits, dim=-1)
             entail_prob = float(probs[-1])
-        return entail_prob >= self._entail_threshold
+        if entail_prob >= self._entail_threshold:
+            return entail_prob
+        return None
 
     def _load_models(self) -> Dict[str, Optional[ModelBundle]]:
         models: Dict[str, Optional[ModelBundle]] = {"ru": None, "en": None}

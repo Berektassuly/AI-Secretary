@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .logic import ExtractionError, TaskExtractor
-from .models import HealthResponse, TasksOutput, TextInput
+from .models import ActionItemModel, HealthResponse, TasksOutput, TextInput
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -62,8 +62,9 @@ async def extract_tasks(payload: TextInput, request: Request) -> TasksOutput:
     )
     try:
         tasks = extractor.extract_tasks(payload.text)
-        logger.info("extraction completed", extra={"tasks_count": len(tasks)})
-        return TasksOutput(tasks=tasks)
+        serialised = [ActionItemModel.from_entity(item) for item in tasks]
+        logger.info("extraction completed", extra={"tasks_count": len(serialised)})
+        return TasksOutput(tasks=serialised)
     except ExtractionError as exc:
         logger.exception("Extraction error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc

@@ -1,3 +1,5 @@
+import type { Buffer } from "node:buffer";
+
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_TRANSCRIPTION_MODEL = "whisper-1";
 
@@ -67,6 +69,19 @@ function inferExtension(mimeType: string | undefined): string {
   }
   const subtype = mimeType.split("/").pop();
   return subtype ? `.${subtype}` : ".wav";
+}
+
+function ensureBlob(data: ArrayBuffer | Buffer, mimeType?: string): Blob {
+  if (data instanceof ArrayBuffer) {
+    return new Blob([data], { type: mimeType ?? "application/octet-stream" });
+  }
+  const arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  return new Blob([arrayBuffer], { type: mimeType ?? "application/octet-stream" });
+}
+
+function createFileFromData(data: ArrayBuffer | Buffer, fileName: string, mimeType?: string): File {
+  const blob = ensureBlob(data, mimeType);
+  return new File([blob], fileName, { type: mimeType ?? blob.type });
 }
 
 function safeParseJson<T>(payload: string): T | null {
@@ -157,4 +172,13 @@ export async function transcribeAudioFile(file: File): Promise<string> {
     throw new Error("OpenAI Whisper API вернул пустую транскрипцию");
   }
   return transcript;
+}
+
+export async function transcribeAudioBuffer(
+  data: ArrayBuffer | Buffer,
+  fileName = "meeting-audio",
+  mimeType?: string,
+): Promise<string> {
+  const file = createFileFromData(data, fileName, mimeType);
+  return transcribeAudioFile(file);
 }

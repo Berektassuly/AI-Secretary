@@ -45,7 +45,7 @@ async function whisperRequest(file: File): Promise<string> {
     const { detail } = (await response.json().catch(() => ({ detail: "Ошибка транскрипции" }))) as {
       detail?: string;
     };
-    throw new Error(detail ?? "Ошибка при обращении к Whisper API");
+    throw new Error(detail ?? "Ошибка при обращении к OpenAI Whisper API");
   }
   const data = (await response.json()) as { transcript: string };
   return data.transcript;

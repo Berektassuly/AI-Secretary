@@ -1,26 +1,5 @@
-import { Buffer } from "node:buffer";
-import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-const whisperCppBinary = process.env.WHISPER_CPP_BINARY;
-const whisperCppModel = process.env.WHISPER_CPP_MODEL;
-const whisperCppLanguage = process.env.WHISPER_CPP_LANGUAGE;
-const whisperCppThreads = parsePositiveInteger(process.env.WHISPER_CPP_THREADS);
-const whisperCppEnabled = parseBoolean(process.env.WHISPER_CPP_ENABLED, true);
-const whisperCppTimeoutMs = parseTimeout(process.env.WHISPER_CPP_TIMEOUT_MS);
-
-const MAX_STDERR_LOG_LENGTH = 2000;
-
-function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
-  if (value === undefined) {
-    return defaultValue;
-  }
-  const normalized = value.trim().toLowerCase();
-  return !["false", "0", "no"].includes(normalized);
-}
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_TRANSCRIPTION_MODEL = "whisper-1";
 
 function parsePositiveInteger(value: string | undefined): number | undefined {
   if (!value) {
@@ -30,139 +9,152 @@ function parsePositiveInteger(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function parseTimeout(value: string | undefined): number | undefined {
-  if (!value) {
-    return 300_000; // 5 minutes by default
+function resolveBaseUrl(rawBaseUrl: string | undefined): string {
+  if (!rawBaseUrl) {
+    return DEFAULT_OPENAI_BASE_URL;
   }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  const trimmed = rawBaseUrl.trim();
+  if (!trimmed) {
+    return DEFAULT_OPENAI_BASE_URL;
+  }
+  return trimmed.replace(/\/$/, "");
 }
 
-function isWhisperCppAvailable(): boolean {
-  return Boolean(whisperCppEnabled && whisperCppBinary && whisperCppModel);
+function buildTranscriptionEndpoint(): string {
+  const baseUrl = resolveBaseUrl(process.env.OPENAI_BASE_URL);
+  return `${baseUrl}/audio/transcriptions`;
 }
 
-function getFileExtension(name: string | undefined): string {
-  if (!name) {
-    return "";
-  }
-  const lastDot = name.lastIndexOf(".");
-  if (lastDot === -1) {
-    return "";
-  }
-  return name.slice(lastDot);
+function resolveModel(): string {
+  const model = process.env.OPENAI_WHISPER_MODEL?.trim();
+  return model && model.length > 0 ? model : DEFAULT_TRANSCRIPTION_MODEL;
 }
 
-async function runWhisperCpp(binary: string, args: string[], timeoutMs?: number): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stderrBuffer = "";
-    let completed = false;
-    let timeoutHandle: NodeJS.Timeout | null = null;
-
-    const cleanup = () => {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-        timeoutHandle = null;
-      }
-    };
-
-    const rejectOnce = (error: Error) => {
-      if (completed) {
-        return;
-      }
-      completed = true;
-      cleanup();
-      reject(error);
-    };
-
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
-      stderrBuffer = `${stderrBuffer}${chunk}`;
-      if (stderrBuffer.length > MAX_STDERR_LOG_LENGTH) {
-        stderrBuffer = stderrBuffer.slice(-MAX_STDERR_LOG_LENGTH);
-      }
-    });
-
-    child.on("error", (error) => {
-      rejectOnce(new Error(`Failed to start whisper.cpp binary: ${error.message}`));
-    });
-
-    child.on("close", (code) => {
-      if (completed) {
-        return;
-      }
-      completed = true;
-      cleanup();
-      if (code === 0) {
-        resolve();
-      } else {
-        const trimmedStderr = stderrBuffer.trim();
-        const details = trimmedStderr ? `: ${trimmedStderr}` : "";
-        reject(new Error(`whisper.cpp exited with code ${code}${details}`));
-      }
-    });
-
-    if (timeoutMs && timeoutMs > 0) {
-      timeoutHandle = setTimeout(() => {
-        child.kill("SIGKILL");
-        rejectOnce(new Error(`whisper.cpp timed out after ${timeoutMs} ms`));
-      }, timeoutMs);
-    }
-  });
+function resolveLanguage(): string | undefined {
+  const language = process.env.OPENAI_WHISPER_LANGUAGE?.trim();
+  return language && language.length > 0 ? language : undefined;
 }
 
-async function transcribeFileWithWhisperCpp(file: File): Promise<string> {
-  if (!whisperCppBinary || !whisperCppModel) {
-    throw new Error("whisper.cpp binary or model path is not configured");
+function resolveTimeout(): number | undefined {
+  return parsePositiveInteger(process.env.OPENAI_REQUEST_TIMEOUT_MS);
+}
+
+function normaliseFileName(file: File): string {
+  if (file.name && file.name.trim().length > 0) {
+    return file.name;
   }
+  const extension = inferExtension(file.type);
+  return `meeting-audio${extension}`;
+}
 
-  const tempDir = await mkdtemp(join(tmpdir(), "whisper-"));
-  const extension = getFileExtension(file.name);
-  const inputFileName = `${randomUUID()}${extension || ".tmp"}`;
-  const inputFilePath = join(tempDir, inputFileName);
-  const outputBasePath = join(tempDir, "transcript");
+function inferExtension(mimeType: string | undefined): string {
+  const mapping: Record<string, string> = {
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/webm": ".webm",
+    "audio/mp4": ".m4a",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+  };
+  if (!mimeType) {
+    return ".wav";
+  }
+  if (mapping[mimeType]) {
+    return mapping[mimeType];
+  }
+  const subtype = mimeType.split("/").pop();
+  return subtype ? `.${subtype}` : ".wav";
+}
 
+function safeParseJson<T>(payload: string): T | null {
+  if (!payload) {
+    return null;
+  }
   try {
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await writeFile(inputFilePath, buffer);
-
-    const args = ["-m", whisperCppModel, "-f", inputFilePath, "-otxt", "-of", outputBasePath];
-    if (whisperCppLanguage) {
-      args.push("-l", whisperCppLanguage);
-    }
-    if (whisperCppThreads !== undefined) {
-      args.push("-t", String(whisperCppThreads));
-    }
-
-    await runWhisperCpp(whisperCppBinary, args, whisperCppTimeoutMs);
-
-    const transcriptPath = `${outputBasePath}.txt`;
-    const transcriptRaw = await readFile(transcriptPath, "utf8");
-    const transcript = transcriptRaw.replace(/\r?\n/g, "\n").trim();
-    if (!transcript) {
-      throw new Error("whisper.cpp produced an empty transcription");
-    }
-    return transcript;
+    return JSON.parse(payload) as T;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown whisper.cpp error";
-    throw new Error(`whisper.cpp transcription failed: ${message}`);
+    console.warn("Failed to parse JSON response from OpenAI", error);
+    return null;
+  }
+}
+
+async function fetchWithOptionalTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number | undefined,
+): Promise<Response> {
+  if (!timeoutMs) {
+    return fetch(url, init);
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`OpenAI Whisper запрос превысил лимит ${timeoutMs} мс`);
+    }
+    throw error;
   } finally {
-    await rm(tempDir, { recursive: true, force: true });
+    clearTimeout(timeout);
   }
 }
 
 export async function transcribeAudioFile(file: File): Promise<string> {
-  if (!isWhisperCppAvailable()) {
-    throw new Error(
-      "Локальный движок Whisper не настроен: укажите переменные WHISPER_CPP_BINARY и WHISPER_CPP_MODEL",
-    );
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("OpenAI Whisper не настроен: задайте переменную OPENAI_API_KEY");
   }
 
-  try {
-    return await transcribeFileWithWhisperCpp(file);
-  } catch (error) {
-    console.error("Whisper.cpp transcription failed", error);
-    throw error instanceof Error ? error : new Error("Whisper.cpp transcription failed");
+  const organisation = process.env.OPENAI_ORGANIZATION?.trim();
+  const project = process.env.OPENAI_PROJECT?.trim();
+  const language = resolveLanguage();
+  const model = resolveModel();
+  const timeout = resolveTimeout();
+  const endpoint = buildTranscriptionEndpoint();
+
+  const arrayBuffer = await file.arrayBuffer();
+  const blob = new Blob([arrayBuffer], { type: file.type || "application/octet-stream" });
+
+  const formData = new FormData();
+  formData.append("file", blob, normaliseFileName(file));
+  formData.append("model", model);
+  if (language) {
+    formData.append("language", language);
   }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+  };
+  if (organisation) {
+    headers["OpenAI-Organization"] = organisation;
+  }
+  if (project) {
+    headers["OpenAI-Project"] = project;
+  }
+
+  let response: Response;
+  try {
+    response = await fetchWithOptionalTimeout(endpoint, { method: "POST", body: formData, headers }, timeout);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Не удалось обратиться к OpenAI Whisper";
+    throw new Error(`OpenAI Whisper запрос завершился с ошибкой: ${message}`);
+  }
+
+  const rawPayload = await response.text();
+  const parsed = safeParseJson<{ text?: string; error?: { message?: string } }>(rawPayload);
+
+  if (!response.ok) {
+    const detail = parsed?.error?.message ?? parsed?.text ?? rawPayload || `HTTP ${response.status}`;
+    throw new Error(`OpenAI Whisper вернул ошибку: ${detail}`);
+  }
+
+  const transcript = parsed?.text?.trim();
+  if (!transcript) {
+    throw new Error("OpenAI Whisper API вернул пустую транскрипцию");
+  }
+  return transcript;
 }

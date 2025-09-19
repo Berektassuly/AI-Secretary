@@ -16,6 +16,13 @@ services:
       context: ./ai-secretary-app
     container_name: ai-secretary-app
     environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_WHISPER_MODEL=${OPENAI_WHISPER_MODEL:-whisper-1}
+      - OPENAI_WHISPER_LANGUAGE=${OPENAI_WHISPER_LANGUAGE:-}
+      - OPENAI_ORGANIZATION=${OPENAI_ORGANIZATION:-}
+      - OPENAI_PROJECT=${OPENAI_PROJECT:-}
+      - OPENAI_REQUEST_TIMEOUT_MS=${OPENAI_REQUEST_TIMEOUT_MS:-180000}
       - NLP_SERVICE_URL=http://nlp-service:8000
       - NLP_SERVICE_REQUEST_TIMEOUT_MS=45000
       - NLP_SERVICE_RETRY_COUNT=2

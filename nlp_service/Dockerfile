@@ -9,7 +9,8 @@ RUN pip wheel --wheel-dir /wheels -r requirements.txt
 FROM python:3.11-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/home/appuser/.local/bin:$PATH"
+    PATH="/home/appuser/.local/bin:$PATH" \
+    HF_HUB_ENABLE_HF_TRANSFER=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \

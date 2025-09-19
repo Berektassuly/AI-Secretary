@@ -1,6 +1,7 @@
 "use client";
 
-import { FileUploader } from "@/components/workflow/FileUploader";
+import { MeetingHistoryPanel } from "@/components/workflow/MeetingHistoryPanel";
+import { MeetingSourceTabs } from "@/components/workflow/MeetingSourceTabs";
 import { JiraIntegrationForm } from "@/components/workflow/JiraIntegrationForm";
 import { ResultsDashboard } from "@/components/workflow/ResultsDashboard";
 import { WorkflowTracker } from "@/components/workflow/WorkflowTracker";
@@ -11,7 +12,8 @@ const DEFAULT_JIRA_BASE_URL = process.env.NEXT_PUBLIC_JIRA_DEFAULT_BASE_URL ?? "
 export default function HomePage() {
   const {
     state,
-    actions: { startUpload, submitToJira, reset },
+    history,
+    actions: { startUpload, startZoomImport, startGoogleImport, submitToJira, clearHistory, reset },
   } = useWorkflowManager();
 
   const isProcessing =
@@ -25,7 +27,12 @@ export default function HomePage() {
   return (
     <div className="space-y-10">
       {canStartNewFlow && (
-        <FileUploader onUpload={startUpload} disabled={state.status === "submittingJira"} />
+        <MeetingSourceTabs
+          onUpload={startUpload}
+          onZoomImport={startZoomImport}
+          onGoogleImport={startGoogleImport}
+          disabled={state.status === "submittingJira"}
+        />
       )}
 
       {state.status === "error" && (
@@ -63,6 +70,8 @@ export default function HomePage() {
           defaultBaseUrl={DEFAULT_JIRA_BASE_URL}
         />
       )}
+
+      {history.length > 0 && <MeetingHistoryPanel history={history} onClear={clearHistory} />}
 
       {state.status === "done" && (
         <div className="mx-auto max-w-3xl rounded-lg border border-green-200 bg-green-50 p-6 text-green-700">

@@ -1,0 +1,70 @@
+[
+  {
+    "id": "marketing-sync",
+    "transcript": "На встрече договорились: Аня подготовит обновленный медиаплан к пятнице. Дима проверит интеграцию оплаты до 12 апреля. Марина свяжется с клиентом в понедельник и отправит письмо с итогами.",
+    "expected": [
+      {
+        "summary": "подготовит обновленный медиаплан к пятнице",
+        "assignee": "Аня",
+        "due": "Friday",
+        "priority": "Medium",
+        "labels": ["marketing"]
+      },
+      {
+        "summary": "проверит интеграцию оплаты до 12 апреля",
+        "assignee": "Дима",
+        "due": "12 апреля",
+        "priority": "High",
+        "labels": ["development"]
+      },
+      {
+        "summary": "свяжется с клиентом в понедельник",
+        "assignee": "Марина",
+        "due": "понедельник",
+        "priority": "Medium",
+        "labels": ["sales"]
+      },
+      {
+        "summary": "отправит письмо с итогами",
+        "assignee": "Марина",
+        "due": null,
+        "priority": "Low",
+        "labels": ["communication"]
+      }
+    ]
+  },
+  {
+    "id": "product-launch",
+    "transcript": "Action items: Alex will deploy the analytics dashboard by Wednesday. Priya prepares the onboarding guide and schedules a training session next week. Chen reviews the legal contract tomorrow morning.",
+    "expected": [
+      {
+        "summary": "deploy the analytics dashboard by Wednesday",
+        "assignee": "Alex",
+        "due": "Wednesday",
+        "priority": "High",
+        "labels": ["development"]
+      },
+      {
+        "summary": "prepares the onboarding guide",
+        "assignee": "Priya",
+        "due": null,
+        "priority": "Medium",
+        "labels": ["documentation"]
+      },
+      {
+        "summary": "schedules a training session next week",
+        "assignee": "Priya",
+        "due": "next week",
+        "priority": "Medium",
+        "labels": ["training"]
+      },
+      {
+        "summary": "reviews the legal contract tomorrow morning",
+        "assignee": "Chen",
+        "due": "tomorrow",
+        "priority": "High",
+        "labels": ["legal"]
+      }
+    ]
+  }
+]

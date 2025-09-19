@@ -1,9 +1,11 @@
+import type { ActionItem } from "./types";
+
 const DEFAULT_BASE_URL = process.env.NLP_SERVICE_URL ?? "http://nlp-service:8000";
 const REQUEST_TIMEOUT = Number(process.env.NLP_SERVICE_REQUEST_TIMEOUT_MS ?? 45000);
 const RETRY_COUNT = Number(process.env.NLP_SERVICE_RETRY_COUNT ?? 2);
 
 export interface TaskExtractionResponse {
-  tasks: string[];
+  tasks: ActionItem[];
 }
 
 export class NLPServiceError extends Error {
@@ -36,7 +38,7 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise
   }
 }
 
-export async function extractTasks(transcript: string): Promise<string[]> {
+export async function extractTasks(transcript: string): Promise<ActionItem[]> {
   const url = `${DEFAULT_BASE_URL.replace(/\/$/, "")}/extract-tasks`;
   let lastError: unknown;
   for (let attempt = 0; attempt <= RETRY_COUNT; attempt += 1) {
@@ -49,7 +51,10 @@ export async function extractTasks(transcript: string): Promise<string[]> {
         throw new NLPServiceError(`Ошибка NLP-сервиса: ${response.status}`, response.status ?? undefined);
       }
       const data = (await response.json()) as TaskExtractionResponse;
-      return data.tasks;
+      return data.tasks.map((task) => ({
+        ...task,
+        labels: Array.isArray(task.labels) ? task.labels : [],
+      }));
     } catch (error) {
       lastError = error;
       if (attempt === RETRY_COUNT) {

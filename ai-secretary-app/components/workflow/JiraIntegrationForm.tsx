@@ -28,7 +28,7 @@ export function JiraIntegrationForm({ onSubmit, disabled, defaultBaseUrl }: Jira
   const [error, setError] = useState<string | null>(null);
   const [labelsInput, setLabelsInput] = useState("");
 
-  const handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = event.target;
     const nextValue =
       name === "projectKey" ? value.toUpperCase().replace(/\s+/g, "") : value;

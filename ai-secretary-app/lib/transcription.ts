@@ -163,7 +163,7 @@ export async function transcribeAudioFile(file: File): Promise<string> {
   const parsed = safeParseJson<{ text?: string; error?: { message?: string } }>(rawPayload);
 
   if (!response.ok) {
-    const detail = parsed?.error?.message ?? parsed?.text ?? rawPayload || `HTTP ${response.status}`;
+    const detail = (parsed?.error?.message ?? parsed?.text ?? rawPayload) || `HTTP ${response.status}`;
     throw new Error(`OpenAI Whisper вернул ошибку: ${detail}`);
   }
 

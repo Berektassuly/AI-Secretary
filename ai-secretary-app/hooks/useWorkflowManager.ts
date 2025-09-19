@@ -77,9 +77,9 @@ async function nlpRequest(transcript: string): Promise<ActionItem[]> {
   return data.tasks;
 }
 
-async function ingestRequest(
+async function ingestRequest<T>(
   endpoint: string,
-  payload: Record<string, unknown>,
+  payload: T,
 ): Promise<{ transcript: string; tasks: ActionItem[] }> {
   const response = await fetch(endpoint, {
     method: "POST",
